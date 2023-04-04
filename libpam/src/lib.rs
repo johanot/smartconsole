@@ -17,51 +17,33 @@ use rand::Rng;
 use rand::distributions::Alphanumeric;
 
 
-struct PamPlat;
+struct PamSMC;
 
-impl PamServiceModule for PamPlat {
+fn read_key() {
+    let f = File::open("server.private").unwrap();
+    let mut reader = BufReader::new(f);
+    let mut buffer = Vec::new();
+
+    reader.read_to_end(&mut buffer).unwrap();
+    let bytes: [u8; 32] = buffer.as_slice().try_into().unwrap();
+}
+
+impl PamServiceModule for PamSMC {
     fn setcred(pamh: Pam, _: PamFlags, args: Vec<String>) -> PamError {
         PamError::SUCCESS
     }
     fn authenticate(pamh: Pam, _: PamFlags, args: Vec<String>) -> PamError {
         match || -> Result<(), PamError> {
-/*            
-            let alice_secret_key = SecretKey::generate(&mut OsRng);
-            let bob_secret_key = SecretKey::generate(&mut OsRng);
-            let bob_public_key = bob_secret_key.public_key();
-*/          
             let username = pamh.get_user(None)?.ok_or(PamError::AUTH_ERR)?;
 
-            let f = File::open("server.private").unwrap();
-            let mut reader = BufReader::new(f);
-            let mut buffer = Vec::new();
-            
-            // Read file into vector.
-            reader.read_to_end(&mut buffer).unwrap();
-            let bytes: [u8; 32] = buffer.as_slice().try_into().unwrap();
+            let key = read_key("server.private");
             let alice_secret_key = SecretKey::from(bytes);
 
-            let f = File::open(&format!("{}.public", &username.to_str().unwrap())).unwrap();
-            let mut reader = BufReader::new(f);
-            let mut buffer = Vec::new();
-            
-            // Read file into vector.
-            reader.read_to_end(&mut buffer).unwrap();
-            let bytes: [u8; 32] = buffer.as_slice().try_into().unwrap();
+            let key = read_key(&format!("{}.public", &username.to_str().unwrap()));
             let bob_public_key = PublicKey::from(bytes);
 
             let alice_public_key_bytes = alice_secret_key.public_key().as_bytes().clone();
             let bob_public_key_bytes = bob_public_key.as_bytes().clone();
-/*            
-            let mut f = std::fs::File::create("alice.private").unwrap();
-            f.write_all(alice_secret_key.as_bytes());
-            let mut f = std::fs::File::create("alice.public").unwrap();
-            f.write_all(&alice_public_key_bytes);
-            let mut f = std::fs::File::create("bob.private").unwrap();
-            f.write_all(bob_secret_key.as_bytes());
-            let mut f = std::fs::File::create("bob.public").unwrap();
-            f.write_all(&bob_public_key_bytes);
-*/
             
             let bob_public_key = PublicKey::from(bob_public_key_bytes);
             let alice_box = ChaChaBox::new(&bob_public_key, &alice_secret_key);
@@ -101,7 +83,6 @@ impl PamServiceModule for PamPlat {
 
             let passcode = pamh.conv(Some("One-time passcode: "), PamMsgStyle::PROMPT_ECHO_ON)?.ok_or(PamError::AUTH_ERR)?;
             if passcode.to_str().map_err(|_| PamError::AUTH_ERR)? == s {
-                //pamh.set_authtok(&CString::new("wf9wao").unwrap())?;
                 Ok(())
             } else {
                 Err(PamError::CONV_AGAIN)
@@ -113,4 +94,4 @@ impl PamServiceModule for PamPlat {
     }
 }
 
-pam_module!(PamPlat);
+pam_module!(PamSMC);
