@@ -1,0 +1,11 @@
+[workspace]
+members =[
+  "cli",
+  "libpam",
+]
+
+[workspace.dependencies]
+base64 = "0"
+crypto_box = "0"
+qrcode = "0"
+rand = "*"
