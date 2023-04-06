@@ -20,6 +20,7 @@ use std::str::Utf8Error;
 use std::array::TryFromSliceError;
 
 use base64::{Engine as _, engine::{general_purpose}};
+use std::collections::HashMap;
 
 
 struct PamSMC;
@@ -90,6 +91,17 @@ fn read_key<T: Into<PathBuf>>(path: T) -> Result<[u8; 32], PamSMCError> {
     Ok(buffer.as_slice().try_into()?)
 }
 
+fn parse_args(args: Vec<String>) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for a in args {
+        let parts: Vec<&str> = a.split('=').collect();
+        if let Some(key) = parts.get(0) {
+            map.insert(key.to_string(), parts.get(1).unwrap_or(&"").to_string());
+        }
+    }
+    map
+}
+
 impl PamServiceModule for PamSMC {
     fn setcred(_pamh: Pam, _flags: PamFlags, _args: Vec<String>) -> PamError {
         PamError::SUCCESS
@@ -98,12 +110,15 @@ impl PamServiceModule for PamSMC {
         match || -> Result<(), PamSMCError> {
             let username = pamh.get_user(None)?.ok_or(PamError::AUTH_ERR)?;
 
-            println!("{:?}", args);
+            let kv_args = parse_args(args);
+            let key_dir = PathBuf::from(kv_args.get("key_dir").unwrap_or(&"/var/secrets".to_string()));
+            let server_private_key_path = key_dir.join("server.private");
+            let user_public_key_path = key_dir.join(&format!("{}.public", username.to_str()?));
 
-            let key = read_key("/var/secrets/smartconsole.server.private")?;
+            let key = read_key(server_private_key_path)?;
             let server_secret_key = SecretKey::from(key);
 
-            let key = read_key(&format!("/var/secrets/{}.public", &username.to_str()?))?;
+            let key = read_key(user_public_key_path)?;
             let user_public_key = PublicKey::from(key);
 
             let user_public_key_bytes = user_public_key.as_bytes().clone();
