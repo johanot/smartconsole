@@ -21,6 +21,7 @@ use std::array::TryFromSliceError;
 
 use base64::{Engine as _, engine::{general_purpose}};
 use std::collections::HashMap;
+use std::num::ParseIntError;
 
 
 struct PamSMC;
@@ -32,14 +33,15 @@ enum PamSMCError {
     UTF8(Utf8Error),
     Pam(PamError),
     TryFromSlice(TryFromSliceError),
-    TryAgain,
     QR(QrError),
+    MaxTries,
+    PasswordAttemptsArgParseError(ParseIntError),
 }
 
 impl std::convert::From<PamSMCError> for PamError {
     fn from(inner: PamSMCError) -> PamError {
         match inner {
-            PamSMCError::TryAgain => PamError::CONV_AGAIN,
+            PamSMCError::MaxTries => PamError::MAXTRIES,
             PamSMCError::Pam(e) => e,
             _ => PamError::AUTH_ERR,
         }
@@ -159,12 +161,19 @@ impl PamServiceModule for PamSMC {
             pamh.conv(Some(&image), PamMsgStyle::TEXT_INFO)?;
             pamh.conv(Some(&format!("Challenge: {}", code_data)), PamMsgStyle::TEXT_INFO)?;
 
-            let passcode = pamh.conv(Some("One-time passcode: "), PamMsgStyle::PROMPT_ECHO_ON)?.ok_or(PamError::AUTH_ERR)?;
-            if passcode.to_str().map_err(|_| PamError::AUTH_ERR)? == challenge {
-                Ok(())
-            } else {
-                Err(PamSMCError::TryAgain)
+            let mut attempts = 0;
+            let max_attempts: u8 = kv_args.get("attempts").unwrap_or(&"3".to_string()).parse().map_err(|e| PamSMCError::PasswordAttemptsArgParseError(e))?;
+            while attempts < max_attempts {
+                let passcode = pamh.conv(Some("One-time passcode: "), PamMsgStyle::PROMPT_ECHO_ON)?.ok_or(PamError::AUTH_ERR)?;
+                if passcode.to_str().map_err(|_| PamError::AUTH_ERR)? == challenge {
+                    return Ok(())
+                } else {
+                    pamh.conv(Some(&format!("Sorry, try again.")), PamMsgStyle::TEXT_INFO)?;
+                    attempts=attempts+1;
+                }
             }
+            pamh.conv(Some(&format!("Too many incorrect attempts")), PamMsgStyle::TEXT_INFO)?;
+            Err(PamSMCError::MaxTries)
         }() {
             Ok(_) => PamError::SUCCESS,
             Err(e) => e.into(),
