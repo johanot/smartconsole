@@ -104,7 +104,13 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 type Challenge = String;
 
 fn main() {
+  // set default log-level to "info" if RUST_LOG is not set in the environment
+  match std::env::var("RUST_LOG") {
+    Err(std::env::VarError::NotPresent) => std::env::set_var("RUST_LOG", "info"),
+    Ok(_) | Err(_) => {},
+  };
   pretty_env_logger::init();
+
   let matches = clap::Command::new("smartconsole")
         .version(VERSION)
         .subcommand_required(true)
