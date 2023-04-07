@@ -144,13 +144,14 @@ impl PamServiceModule for PamSMC {
             let ciphertext = encryption_box.encrypt(&nonce, Payload {
                 msg: challenge.as_bytes(), // your message to encrypt
                 aad: associated_data, // not encrypted, but authenticated in tag
-            })?; //TODO: don't panic
-        
+            })?;
+
             let b64 = general_purpose::STANDARD;
             let b64_ciphertext = b64.encode(ciphertext);
             let b64_nonce = b64.encode(nonce);
+            let b64_public_key = b64.encode(server_secret_key.public_key());
             
-            let code_data = format!("{}:{}", b64_ciphertext, b64_nonce);
+            let code_data = format!("{}:{}:{}", b64_ciphertext, b64_nonce, b64_public_key);
 
             let code = QrCode::new(&code_data)?;
             let image = code.render::<unicode::Dense1x2>()

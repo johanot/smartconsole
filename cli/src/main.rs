@@ -25,7 +25,7 @@ static ENCRYPTION_CONFIG: OnceCell<EncryptionConfig> = OnceCell::new();
 
 #[derive(Debug)]
 struct EncryptionConfig {
-  public_key_path: PathBuf,
+  public_key_path: Option<PathBuf>,
   private_key_path: PathBuf,
 }
 
@@ -138,9 +138,9 @@ fn main() {
               clap::Arg::new("public-key")
                 .short('p')
                 .long("public-key")
-                .help("use this server public key to verify the decrypted challenge")
+                .help("optionally, use this server public key to verify the decrypted challenge")
                 .takes_value(true)
-                .required(true)
+                .required(false)
             )
             .arg(
               clap::Arg::new("private-key")
@@ -160,10 +160,10 @@ fn main() {
       cli_key_gen(&key_pair_path.into())
     } else if matches.subcommand_name().unwrap() == "decrypt" {
       let decrypt_matches = matches.subcommand_matches("decrypt").unwrap();
-      let public_key_path: &String = decrypt_matches.get_one::<String>("public-key").unwrap();
+      let public_key_path: Option<&String> = decrypt_matches.get_one::<String>("public-key");
       let private_key_path: &String = decrypt_matches.get_one::<String>("private-key").unwrap();
       ENCRYPTION_CONFIG.set(EncryptionConfig {
-        public_key_path: public_key_path.into(),
+        public_key_path: public_key_path.map(|p| p.into()),
         private_key_path: private_key_path.into(),
       }).unwrap();
       (if decrypt_matches.is_present("file") {
@@ -265,13 +265,18 @@ fn decrypt(content: &str) -> Result<Challenge, SmartConsoleCLIError> {
 
   let encryption_config = ENCRYPTION_CONFIG.get().ok_or(SmartConsoleCLIError::EncryptionConfigError)?;
 
-  let f = File::open(&encryption_config.public_key_path)?;
-  let mut reader = BufReader::new(f);
-  let mut buffer = Vec::new();
-  
-  // Read file into vector.
-  reader.read_to_end(&mut buffer)?;
-  let bytes: [u8; 32] = buffer.as_slice().try_into().map_err(|_| SmartConsoleCLIError::PublicKeyFormat)?;
+  let server_public_key = match &encryption_config.public_key_path {
+    Some(path) => {
+      let f = File::open(&path)?;
+      let mut reader = BufReader::new(f);
+      let mut buffer = Vec::new();
+      reader.read_to_end(&mut buffer)?;
+      buffer
+    },
+    None => b64.decode(parts.get(2).ok_or(SmartConsoleCLIError::ChallengeParts)?)?,
+  };
+
+  let bytes: [u8; 32] = server_public_key.try_into().map_err(|_| SmartConsoleCLIError::PublicKeyFormat)?;
   let server_public_key = PublicKey::from(bytes);
 
   let f = File::open(&encryption_config.private_key_path)?;
