@@ -1,5 +1,5 @@
 use arboard::Clipboard;
-use image::{DynamicImage, ImageBuffer, RgbaImage, ImageError, GenericImageView};
+use image::{DynamicImage, ImageBuffer, RgbaImage, ImageError};
 use zbar_rust::ZBarImageScanner;
 
 use std::io::{Read, Write};
@@ -19,6 +19,8 @@ use thiserror::Error;
 use log::{error, info};
 use std::string::FromUtf8Error;
 use std::num::TryFromIntError;
+
+use chrono::{DateTime, Utc};
 
 use once_cell::sync::OnceCell;
 static ENCRYPTION_CONFIG: OnceCell<EncryptionConfig> = OnceCell::new();
@@ -115,13 +117,25 @@ fn main() {
         .version(VERSION)
         .subcommand_required(true)
         .arg_required_else_help(true)
+        .arg(
+          clap::Arg::new("key-dir")
+            .long("key-dir")
+            .help("Path at which to read and write keys (overrides env var: $SMARTCONSOLE_KEY_DIR)")
+            .takes_value(true)
+        )
         .subcommand(
           clap::Command::new("keygen")
           .arg(
-            clap::Arg::new("key-pair-path")
-            .long("key-pair-path")
+            clap::Arg::new("path")
+            .long("path")
+            .help("Path in which to place the generated keypair, defaults to \"--key-dir\"")
             .takes_value(true)
-            .default_value("key")
+          )
+          .arg(
+            clap::Arg::new("name")
+            .long("name")
+            .help("Name of the generated keypair (default: <current-timestamp>)")
+            .takes_value(true)
           )
         )
         .subcommand(
@@ -159,11 +173,21 @@ fn main() {
         )
         .get_matches();
 
+  let key_dir: PathBuf = matches.get_one::<String>("key-dir")
+    .or(std::env::var("SMARTCONSOLE_KEY_DIR").ok().as_ref())
+    .map(PathBuf::from)
+    .or(home::home_dir().map(|p| p.join(".smartconsole")))
+    .unwrap();
+
   let cmd_res = {
     if matches.subcommand_name().unwrap() == "keygen" {
       let key_gen_matches = matches.subcommand_matches("keygen").unwrap();
-      let key_pair_path: &String = key_gen_matches.get_one::<String>("key-pair-path").unwrap();
-      cli_key_gen(&key_pair_path.into())
+      let key_pair_path: PathBuf = key_gen_matches.get_one::<String>("path").map(PathBuf::from).unwrap_or(key_dir);
+      let key_pair_name: String = key_gen_matches.get_one::<String>("name").map(std::borrow::ToOwned::to_owned).unwrap_or({
+        let now: DateTime<Utc> = Utc::now();
+        now.format("%Y-%m-%dT%H%M%S").to_string()
+      });
+      cli_key_gen(&key_pair_path.into(), &key_pair_name)
     } else if matches.subcommand_name().unwrap() == "decrypt" {
       let decrypt_matches = matches.subcommand_matches("decrypt").unwrap();
       let public_key_path: Option<&String> = decrypt_matches.get_one::<String>("public-key");
@@ -194,7 +218,7 @@ fn main() {
   }
 }
 
-fn cli_key_gen(path: &PathBuf) -> Result<(), SmartConsoleCLIError> {
+fn cli_key_gen(path: &PathBuf, name: &String) -> Result<(), SmartConsoleCLIError> {
 
   let die_if_exists = |path: &PathBuf| {
     match path.exists() {
@@ -203,15 +227,17 @@ fn cli_key_gen(path: &PathBuf) -> Result<(), SmartConsoleCLIError> {
     }
   };
 
-  let private_key_path = path.with_extension("private");
-  let public_key_path = path.with_extension("public");
+  let base_path = path.join(name);
+  let private_key_path = base_path.with_extension("private");
+  let public_key_path = base_path.with_extension("public");
 
   info!("generating key pair: {:?} / {:?}", private_key_path, public_key_path);
 
   die_if_exists(&private_key_path)?;
   die_if_exists(&public_key_path)?;
 
-  path.parent().map_or(Ok(()), |p| std::fs::create_dir_all(p))?;
+  // if this already exists, it should be ok
+  std::fs::create_dir_all(path)?;
 
   let private_key = SecretKey::generate(&mut OsRng);
   let public_key = private_key.public_key();
