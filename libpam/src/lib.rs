@@ -1,28 +1,26 @@
-
 use crypto_box::{
-    aead::{Aead, AeadCore, Payload, OsRng},
-    ChaChaBox, PublicKey, SecretKey
+    aead::{Aead, AeadCore, OsRng, Payload},
+    ChaChaBox, PublicKey, SecretKey,
 };
-use pamsm::{PamServiceModule, Pam, PamFlags, PamError};
 use pamsm::{pam_module, PamLibExt, PamMsgStyle};
+use pamsm::{Pam, PamError, PamFlags, PamServiceModule};
 
-use qrcode::QrCode;
 use qrcode::render::unicode;
+use qrcode::QrCode;
 
-use std::io::Read;
-use std::io::BufReader;
-use std::fs::File;
-use rand::Rng;
-use rand::distributions::Alphanumeric;
-use std::path::PathBuf;
 use qrcode::types::QrError;
-use std::str::Utf8Error;
+use rand::distributions::Alphanumeric;
+use rand::Rng;
 use std::array::TryFromSliceError;
+use std::fs::File;
+use std::io::BufReader;
+use std::io::Read;
+use std::path::PathBuf;
+use std::str::Utf8Error;
 
-use base64::{Engine as _, engine::{general_purpose}};
+use base64::{engine::general_purpose, Engine as _};
 use std::collections::HashMap;
 use std::num::ParseIntError;
-
 
 struct PamSMC;
 
@@ -113,9 +111,14 @@ impl PamServiceModule for PamSMC {
             let username = pamh.get_user(None)?.ok_or(PamError::AUTH_ERR)?;
 
             let kv_args = parse_args(args);
-            let key_dir = PathBuf::from(kv_args.get("key_dir").unwrap_or(&"/var/secrets".to_string()));
+            let key_dir = PathBuf::from(
+                kv_args
+                    .get("key_dir")
+                    .unwrap_or(&"/var/secrets".to_string()),
+            );
             let server_private_key_path = key_dir.join("server.private");
-            let user_public_key_path = key_dir.join(&format!("{}.public", username.to_str()?));
+            let user_public_key_path =
+                key_dir.join(&format!("{}.public", username.to_str()?));
 
             let key = read_key(server_private_key_path)?;
             let server_secret_key = SecretKey::from(key);
@@ -124,11 +127,11 @@ impl PamServiceModule for PamSMC {
             let user_public_key = PublicKey::from(key);
 
             let user_public_key_bytes = user_public_key.as_bytes().clone();
-            
+
             let user_public_key = PublicKey::from(user_public_key_bytes);
             let encryption_box = ChaChaBox::new(&user_public_key, &server_secret_key);
             let nonce = ChaChaBox::generate_nonce(&mut OsRng);
-        
+
             let challenge: String = rand::thread_rng()
                 .sample_iter(&Alphanumeric)
                 .take(6)
@@ -139,41 +142,61 @@ impl PamServiceModule for PamSMC {
 
             // Message to encrypt
             let associated_data = b"".as_ref();
-        
+
             // Encrypt the message using the box
-            let ciphertext = encryption_box.encrypt(&nonce, Payload {
-                msg: challenge.as_bytes(), // your message to encrypt
-                aad: associated_data, // not encrypted, but authenticated in tag
-            })?;
+            let ciphertext = encryption_box.encrypt(
+                &nonce,
+                Payload {
+                    msg: challenge.as_bytes(), // your message to encrypt
+                    aad: associated_data,      // not encrypted, but authenticated in tag
+                },
+            )?;
 
             let b64 = general_purpose::STANDARD;
             let b64_ciphertext = b64.encode(ciphertext);
             let b64_nonce = b64.encode(nonce);
             let b64_public_key = b64.encode(server_secret_key.public_key());
-            
-            let code_data = format!("{}:{}:{}", b64_ciphertext, b64_nonce, b64_public_key);
+
+            let code_data =
+                format!("{}:{}:{}", b64_ciphertext, b64_nonce, b64_public_key);
 
             let code = QrCode::new(&code_data)?;
-            let image = code.render::<unicode::Dense1x2>()
+            let image = code
+                .render::<unicode::Dense1x2>()
                 .dark_color(unicode::Dense1x2::Light)
                 .light_color(unicode::Dense1x2::Dark)
                 .build();
 
             pamh.conv(Some(&image), PamMsgStyle::TEXT_INFO)?;
-            pamh.conv(Some(&format!("Challenge: {}", code_data)), PamMsgStyle::TEXT_INFO)?;
+            pamh.conv(
+                Some(&format!("Challenge: {}", code_data)),
+                PamMsgStyle::TEXT_INFO,
+            )?;
 
             let mut attempts = 0;
-            let max_attempts: u8 = kv_args.get("attempts").unwrap_or(&"3".to_string()).parse().map_err(|e| PamSMCError::PasswordAttemptsArgParseError(e))?;
+            let max_attempts: u8 = kv_args
+                .get("attempts")
+                .unwrap_or(&"3".to_string())
+                .parse()
+                .map_err(|e| PamSMCError::PasswordAttemptsArgParseError(e))?;
             while attempts < max_attempts {
-                let passcode = pamh.conv(Some("One-time passcode: "), PamMsgStyle::PROMPT_ECHO_ON)?.ok_or(PamError::AUTH_ERR)?;
+                let passcode = pamh
+                    .conv(Some("One-time passcode: "), PamMsgStyle::PROMPT_ECHO_ON)?
+                    .ok_or(PamError::AUTH_ERR)?;
                 if passcode.to_str().map_err(|_| PamError::AUTH_ERR)? == challenge {
-                    return Ok(())
+                    return Ok(());
                 } else {
-                    pamh.conv(Some(&format!("Sorry, try again.")), PamMsgStyle::TEXT_INFO)?;
-                    attempts=attempts+1;
+                    pamh.conv(
+                        Some(&format!("Sorry, try again.")),
+                        PamMsgStyle::TEXT_INFO,
+                    )?;
+                    attempts = attempts + 1;
                 }
             }
-            pamh.conv(Some(&format!("Too many incorrect attempts")), PamMsgStyle::TEXT_INFO)?;
+            pamh.conv(
+                Some(&format!("Too many incorrect attempts")),
+                PamMsgStyle::TEXT_INFO,
+            )?;
             Err(PamSMCError::MaxTries)
         }() {
             Ok(_) => PamError::SUCCESS,
