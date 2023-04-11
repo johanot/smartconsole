@@ -134,7 +134,7 @@ fn main() {
         .arg(
           clap::Arg::new("key-dir")
             .long("key-dir")
-            .help("Path at which to read and write keys (overrides env var: $SMARTCONSOLE_KEY_DIR)")
+            .help("Path at which to read and write keys (overrides env var: $SMARTCONSOLE_KEY_DIR) (default: $HOME/.smartconsole)")
             .takes_value(true)
         )
         .subcommand(
