@@ -34,12 +34,14 @@ enum PamSMCError {
     QR(QrError),
     MaxTries,
     PasswordAttemptsArgParseError(ParseIntError),
+    UserUnknown(Box<PamSMCError>),
 }
 
 impl std::convert::From<PamSMCError> for PamError {
     fn from(inner: PamSMCError) -> PamError {
         match inner {
             PamSMCError::MaxTries => PamError::MAXTRIES,
+            PamSMCError::UserUnknown(_) => PamError::USER_UNKNOWN,
             PamSMCError::Pam(e) => e,
             _ => PamError::AUTH_ERR,
         }
@@ -114,7 +116,7 @@ impl PamServiceModule for PamSMC {
             let key_dir = PathBuf::from(
                 kv_args
                     .get("key_dir")
-                    .unwrap_or(&"/var/secrets".to_string()),
+                    .unwrap_or(&"/var/secrets/smartconsole".to_string()),
             );
             let server_private_key_path = key_dir.join("server.private");
             let user_public_key_path =
@@ -123,7 +125,7 @@ impl PamServiceModule for PamSMC {
             let key = read_key(server_private_key_path)?;
             let server_secret_key = SecretKey::from(key);
 
-            let key = read_key(user_public_key_path)?;
+            let key = read_key(user_public_key_path).map_err(|e| PamSMCError::UserUnknown(Box::new(e)))?;
             let user_public_key = PublicKey::from(key);
 
             let user_public_key_bytes = user_public_key.as_bytes().clone();
