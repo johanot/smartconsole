@@ -273,7 +273,7 @@ fn cli_key_gen(path: &PathBuf, name: &String) -> Result<(), SmartConsoleCLIError
     let private_key = SecretKey::generate(&mut OsRng);
     let public_key = private_key.public_key();
     let mut private_key_file = File::create(private_key_path)?;
-    private_key_file.write_all(private_key.as_bytes())?;
+    private_key_file.write_all(&private_key.to_bytes())?;
     let mut public_key_file = File::create(public_key_path)?;
     public_key_file.write_all(public_key.as_bytes())?;
 

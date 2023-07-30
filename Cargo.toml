@@ -6,6 +6,6 @@ members =[
 
 [workspace.dependencies]
 base64 = "0"
-crypto_box = "0"
+crypto_box = { version = "0", features = ["chacha20"] }
 qrcode = "0"
 rand = "*"
