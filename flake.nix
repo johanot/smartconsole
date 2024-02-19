@@ -72,7 +72,7 @@
       buildInputs = [
         cargo
         openssl.dev
-        pkgconfig
+        pkg-config
         rustc
         rustfmt
       ] ++ buildInputs;
